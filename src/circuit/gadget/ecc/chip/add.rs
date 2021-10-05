@@ -1,6 +1,6 @@
 use std::array;
 
-use super::{copy, CellValue, EccConfig, EccPoint, Var};
+use super::{CellValue, EccConfig, EccPoint, Var, copy, witness_point};
 use ff::Field;
 use halo2::{
     arithmetic::BatchInvert,
@@ -388,10 +388,10 @@ impl Config {
 #[cfg(test)]
 pub mod tests {
     use group::{prime::PrimeCurveAffine, Curve};
-    use halo2::{circuit::Layouter, plonk::Error};
+    use halo2::{circuit::Layouter, dev::MockProver, plonk::Error};
     use pasta_curves::{arithmetic::CurveExt, pallas};
 
-    use crate::circuit::gadget::ecc::{chip::EccPoint, EccInstructions, NonIdentityPoint};
+    use crate::circuit::{self, gadget::ecc::{self, EccInstructions, NonIdentityPoint, chip::EccPoint}};
 
     #[allow(clippy::too_many_arguments)]
     pub fn test_add<
@@ -491,6 +491,120 @@ pub mod tests {
         )?;
         p.add(layouter.namespace(|| "P + endo^2(-P)"), &endo_2_p_neg)?;
 
+        Ok(())
+    }
+
+    use halo2::{
+        circuit::{SimpleFloorPlanner},
+        plonk::{Circuit, ConstraintSystem,},
+    };
+
+    use group::Group;
+    use super::super::{EccConfig, EccChip};
+    use crate::circuit::{LookupRangeCheckConfig};
+
+    /// The full circuit implementation.
+    ///
+    /// In this struct we store the private input variables. We use `Option<F>` because
+    /// they won't have any value during key generation. During proving, if any of these
+    /// were `None` we would get an error.
+    #[derive(Default)]
+    struct MyCircuit {
+    }
+
+    impl Circuit<pallas::Base> for MyCircuit {
+        // Since we are using a single chip for everything, we can just reuse its config.
+        type Config = EccConfig;
+        type FloorPlanner = SimpleFloorPlanner;
+    
+        fn without_witnesses(&self) -> Self {
+            Self::default()
+        }
+    
+        fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
+            let advices = [
+                meta.advice_column(),
+                meta.advice_column(),
+                meta.advice_column(),
+                meta.advice_column(),
+                meta.advice_column(),
+                meta.advice_column(),
+                meta.advice_column(),
+                meta.advice_column(),
+                meta.advice_column(),
+                meta.advice_column(),
+            ];
+            let lookup_table = meta.lookup_table_column();
+            let lagrange_coeffs = [
+                meta.fixed_column(),
+                meta.fixed_column(),
+                meta.fixed_column(),
+                meta.fixed_column(),
+                meta.fixed_column(),
+                meta.fixed_column(),
+                meta.fixed_column(),
+                meta.fixed_column(),
+            ];
+            // Shared fixed column for loading constants
+            let constants = meta.fixed_column();
+            meta.enable_constant(constants);
+
+            let range_check = LookupRangeCheckConfig::configure(meta, advices[9], lookup_table);
+            EccChip::configure(meta, advices, lagrange_coeffs, range_check)
+        }
+    
+        fn synthesize(
+            &self,
+            config: EccConfig,
+            mut layouter: impl Layouter<pallas::Base>,
+        ) -> Result<(), Error> {
+            let ecc_chip = EccChip::construct(config);
+
+            let p_val = pallas::Point::random(rand::rngs::OsRng).to_affine();
+            let p = super::super::super::NonIdentityPoint::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "P"),
+                Some(p_val),
+            )?;
+            let q_val = pallas::Point::random(rand::rngs::OsRng).to_affine();
+            let q = NonIdentityPoint::new(
+                ecc_chip.clone(),
+                layouter.namespace(|| "Q"),
+                Some(q_val),
+            )?;
+    
+            assert_ne!(p_val, q_val);
+    
+            let result = p.add(layouter, &q);
+            Ok(())
+        }
+    }
+
+    #[test]
+    pub fn test_add_circuit() -> Result<(), Error> {
+        let k = 5;
+        let circuit = MyCircuit{};
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+        assert_eq!(prover.verify(), Ok(()));
+
+        use plotters::prelude::*;
+        let root = BitMapBackend::new("ecc_simple_layout.png", (1024, 768)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root
+            .titled("Simple ECC Circuit Layout", ("sans-serif", 60).into_font().color(&BLACK.mix(0.5)))
+            .unwrap();
+
+        halo2::dev::CircuitLayout::default()
+            // You can optionally render only a section of the circuit.
+            //.view_width(0..2)
+            //.view_height(0..16)
+            // You can hide labels, which can be useful with smaller areas.
+            .show_labels(true)
+            // Render the circuit onto your area!
+            // The first argument is the size parameter for the circuit.
+            .render(k as usize, &circuit, &root)
+            .unwrap();
+        
         Ok(())
     }
 }

@@ -58,6 +58,7 @@ pprof = { version = "0.5", features = ["criterion", "flamegraph"] }
 bench = false
 
 [features]
+default = ["dev-graph"]
 dev-graph = ["halo2/dev-graph", "plotters"]
 test-dependencies = ["proptest"]
 
