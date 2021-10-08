@@ -27,7 +27,7 @@ blake2b_simd = "0.5"
 ff = "0.11"
 fpe = "0.5"
 group = "0.11"
-halo2 = "=0.1.0-beta.1"
+halo2 = {git = "ssh://git@github.com/SK0M0R0H/halo2", branch = "skm"}
 lazy_static = "1"
 memuse = { version = "0.2", features = ["nonempty"] }
 pasta_curves = "0.2.1"
