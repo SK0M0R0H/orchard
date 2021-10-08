@@ -575,7 +575,8 @@ pub mod tests {
     
             assert_ne!(p_val, q_val);
     
-            let result = p.add(layouter, &q);
+            let result = p.add(layouter.namespace(|| "add"), &q);
+            let r2 = p.add_incomplete(layouter.namespace(|| "incomplete add"), &q);
             Ok(())
         }
     }
